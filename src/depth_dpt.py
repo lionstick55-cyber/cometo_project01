@@ -1,70 +1,71 @@
 import os
 import torch
 import numpy as np
-import cv2
 from PIL import Image
-from transformers import AutoImageProcessor, DPTForDepthEstimation
+import cv2
+from transformers import DPTImageProcessor, DPTForDepthEstimation
 
-def main():
+# -----------------------------
+# 1. 이미지 폴더 설정
+# -----------------------------
+IMAGE_FOLDER = "images"
+OUTPUT_FOLDER = "images"
 
-    base_dir = os.path.dirname(os.path.dirname(__file__))
-    images_dir = os.path.join(base_dir, "images")
-    results_dir = os.path.join(base_dir, "results")
+# -----------------------------
+# 2. 이미지 이름 입력받기
+# -----------------------------
+image_name = input("images 폴더 안에 있는 이미지 파일 이름을 입력하세요: ")
+image_path = os.path.join(IMAGE_FOLDER, image_name)
 
-    os.makedirs(results_dir, exist_ok=True)
+if not os.path.exists(image_path):
+    print("이미지 파일이 존재하지 않습니다.")
+    print("현재 찾는 경로:", os.path.abspath(image_path))
+    exit()
 
-    # ----------------------------
-    # 1️⃣ 파일 이름 직접 입력
-    # ----------------------------
-    filename = input("변환할 이미지 파일 이름을 입력하세요 (예: cat.jpg): ")
+# -----------------------------
+# 3. 이미지 로드
+# -----------------------------
+image = Image.open(image_path).convert("RGB")
 
-    image_path = os.path.join(images_dir, filename)
+# -----------------------------
+# 4. 모델 로드 (최초 1회 다운로드됨)
+# -----------------------------
+model_name = "Intel/dpt-large"
+image_processor = DPTImageProcessor.from_pretrained(model_name)
+model = DPTForDepthEstimation.from_pretrained(model_name)
 
-    if not os.path.exists(image_path):
-        print("❌ 이미지 파일이 존재하지 않습니다.")
-        print("찾는 경로:", image_path)
-        return
+# -----------------------------
+# 5. Depth 추론
+# -----------------------------
+inputs = image_processor(images=image, return_tensors="pt")
 
-    print("선택된 이미지:", image_path)
+with torch.no_grad():
+    outputs = model(**inputs)
+    predicted_depth = outputs.predicted_depth
 
-    image = Image.open(image_path).convert("RGB")
+# -----------------------------
+# 6. Depth 정규화
+# -----------------------------
+depth = predicted_depth.squeeze().cpu().numpy()
+depth = (depth - depth.min()) / (depth.max() - depth.min())
+depth = (depth * 255).astype("uint8")
 
-    # ----------------------------
-    # 2️⃣ 모델 로드
-    # ----------------------------
-    processor = AutoImageProcessor.from_pretrained("Intel/dpt-large")
-    model = DPTForDepthEstimation.from_pretrained("Intel/dpt-large")
+# -----------------------------
+# 7. 컬러맵 적용
+# -----------------------------
+depth_colormap = cv2.applyColorMap(depth, cv2.COLORMAP_JET)
 
-    inputs = processor(images=image, return_tensors="pt")
+# -----------------------------
+# 8. 저장
+# -----------------------------
+output_name = f"depth_{image_name}"
+output_path = os.path.join(OUTPUT_FOLDER, output_name)
 
-    with torch.no_grad():
-        outputs = model(**inputs)
-        predicted_depth = outputs.predicted_depth
+cv2.imwrite(output_path, depth_colormap)
 
-    # ----------------------------
-    # 3️⃣ Depth 변환
-    # ----------------------------
-    depth = predicted_depth.squeeze().cpu().numpy()
+print("Depth 이미지 저장 완료!")
+print("저장 위치:", os.path.abspath(output_path))
 
-    depth_normalized = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX)
-    depth_uint8 = depth_normalized.astype(np.uint8)
-
-    depth_color = cv2.applyColorMap(depth_uint8, cv2.COLORMAP_JET)
-
-    # ----------------------------
-    # 4️⃣ 저장
-    # ----------------------------
-    name_only = os.path.splitext(filename)[0]
-    save_path = os.path.join(results_dir, f"{name_only}_depth.png")
-
-    cv2.imwrite(save_path, depth_color)
-
-    print("✅ Depth 생성 완료")
-    print("저장 위치:", save_path)
-
-
-if __name__ == "__main__":
-    main()
 
 
 
